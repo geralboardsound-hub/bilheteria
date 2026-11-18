@@ -102,6 +102,12 @@ function vipMessage(credential, eventName) {
 }
 
 /* ---------- autenticação ---------- */
+function motivo(err) {
+  const d = err?.data?.detail || err?.data?.error || '';
+  const campos = err?.data?.errors ? Object.values(err.data.errors).join(' ') : '';
+  return [err?.message || 'Falhou', campos, d].filter(Boolean).join(' — ').slice(0, 220);
+}
+
 function detalhe(err) {
   const d = err?.data?.detail || err?.data?.error || '';
   return d ? ` — ${String(d).slice(0, 160)}` : '';
@@ -502,7 +508,7 @@ async function saveDraft({ publish }) {
       try {
         await api('/api/team/events/' + draft.id + '/publish', { method: 'POST' });
       } catch (errP) {
-        toast('Evento guardado, mas não publicado: ' + (errP.message || 'verifica os lotes'));
+        toast('Guardado, mas não publicado: ' + motivo(errP));
         if (button) { button.disabled = false; button.textContent = 'Publicar evento'; }
         return;
       }
@@ -525,7 +531,7 @@ async function saveDraft({ publish }) {
       });
       toast('Falta concluir: ' + Object.values(errors)[0]);
     } else {
-      toast(err.message);
+      toast(motivo(err));
     }
     if (button) { button.disabled = false; button.textContent = 'Tentar novamente'; }
   }
@@ -550,7 +556,7 @@ async function uploadFlyer(file) {
     draft.flyer = '/api/team/assets/' + data.assetId;
     editorView();
     toast('Cartaz carregado.');
-  } catch (err) { toast(err.message); }
+  } catch (err) { toast('Cartaz: ' + motivo(err)); }
 }
 
 function compressImage(file, max) {
