@@ -1,0 +1,27 @@
+# Bilheteria — bilheteira digital
+# Cloudflare Workers + D1. Plano gratuito, sem mensalidade.
+# Nota: a Cloudflare só aceita nomes de projeto em minúsculas — "bilheteria".
+
+name = "bilheteria"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# O database_id é escrito automaticamente pelo instalador.
+[[d1_databases]]
+binding = "DB"
+database_name = "bilheteria"
+database_id = "SUBSTITUIR_PELO_DATABASE_ID"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Cancela reservas fora do prazo a cada 5 minutos, mesmo sem ninguém ligado.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+APP_NAME = "Bilheteria"
+RESERVATION_HOURS = "12"
+SESSION_HOURS = "12"
