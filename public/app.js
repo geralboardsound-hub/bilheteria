@@ -317,6 +317,30 @@ function pubHTML(ev, preview) {
   </div>`;
 }
 
+/* Telefones do evento: indicativo em campo próprio, número nacional à parte.
+   Guarda-se sempre no formato internacional (+244923000000). */
+const DDI = [['244','Angola (+244)'],['351','Portugal (+351)'],['55','Brasil (+55)'],['258','Moçambique (+258)'],['239','São Tomé (+239)'],['238','Cabo Verde (+238)'],['1','EUA/Canadá (+1)'],['44','Reino Unido (+44)'],['33','França (+33)'],['34','Espanha (+34)'],['27','África do Sul (+27)'],['86','China (+86)']];
+
+function splitPhone(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (!raw) return { prefix: '244', national: '' };
+  if (raw.startsWith('+') || digits.length > 9) {
+    const hit = ['244','351','55','258','239','238','1','44','33','34','27','86'].find(p => digits.startsWith(p) && digits.length - p.length >= 6);
+    if (hit) return { prefix: hit, national: digits.slice(hit.length) };
+  }
+  return { prefix: '244', national: digits.slice(-9) };
+}
+
+function phoneField(key, label, value) {
+  const { prefix, national } = splitPhone(value);
+  const lista = DDI.map(([code, texto]) => `<option value="${code}"${code === prefix ? ' selected' : ''}>${texto}</option>`).join('');
+  return field(key, label, `<div class="event-phone-fields">
+    <select class="in" id="${key}Prefix" aria-label="Indicativo do país" style="color:#14120E;background:#fff">${lista}</select>
+    <input class="in" id="${key}" data-ev="${key}" type="tel" inputmode="numeric" value="${esc(national)}" placeholder="9XX XXX XXX" aria-label="Número sem indicativo" style="color:#14120E;background:#fff">
+  </div>`, 'Escolhe o indicativo e escreve o número sem indicativo (ex.: 923 456 789).');
+}
+
 function field(key, label, inner, hint) {
   return `<div class="fld" data-fld="${key}"><label for="${key}">${label}</label>${inner}${hint ? `<div class="hint">${hint}</div>` : ''}<div class="err"></div></div>`;
 }
@@ -368,7 +392,7 @@ function editorView() {
     <div class="fgrp" style="margin-top:18px">
       <div class="wide">${field('headline', 'Frase de abertura', `<input class="in" id="headline" data-ev="headline" value="${esc(d.headline)}" maxlength="70" placeholder="Garante o teu lugar">`)}</div>
       <div class="wide">${field('note', 'Nota ao cliente', `<input class="in" id="note" data-ev="note" value="${esc(d.note)}" maxlength="120" placeholder="Portas abrem às 19h00">`)}</div>
-      <div class="wide">${field('support', 'WhatsApp de apoio ao cliente', `<input class="in" id="support" data-ev="support" value="${esc(d.support)}" placeholder="+244 9XX XXX XXX">`)}</div>
+      <div class="wide">${phoneField('support', 'WhatsApp de apoio ao cliente', d.support)}</div>
     </div>
     <div style="margin-top:8px">
       <div class="switch"><div><p>Contagem decrescente</p><small>Mostra quanto falta para o evento.</small></div><button type="button" class="tg ${d.showCountdown ? 'on' : ''}" data-action="toggle" data-key="showCountdown" aria-label="Contagem decrescente"></button></div>
@@ -382,7 +406,7 @@ function editorView() {
       ${field('bankAccount', 'Número de conta · opcional', `<input class="in" id="bankAccount" data-ev="bankAccount" value="${esc(d.bankAccount)}" placeholder="Conta à ordem">`)}
       <div class="wide">${field('bankHolder', 'Titular da conta', `<input class="in" id="bankHolder" data-ev="bankHolder" value="${esc(d.bankHolder)}" placeholder="Nome da empresa tal como está no banco" maxlength="80">`)}</div>
       <div class="wide">${field('bankIban', 'IBAN', `<input class="in" id="bankIban" data-ev="bankIban" value="${esc(d.bankIban)}" placeholder="AO06 0000 0000 0000 0000 0000 0" maxlength="40" style="font-family:'IBM Plex Mono',monospace">`)}</div>
-      <div class="wide">${field('proofWhatsapp', 'WhatsApp que recebe os comprovativos', `<input class="in" id="proofWhatsapp" data-ev="proofWhatsapp" value="${esc(d.proofWhatsapp)}" placeholder="+244 9XX XXX XXX">`, 'O cliente abre este número com a mensagem já escrita. Pode ser diferente do número de apoio.')}</div>
+      <div class="wide">${phoneField('proofWhatsapp', 'WhatsApp que recebe os comprovativos', d.proofWhatsapp)}</div>
     </div>
     <div class="note">Estes dados aparecem no link do cliente e na mensagem de WhatsApp. Confirma o IBAN antes de publicar: um erro aqui faz o cliente pagar para a conta errada.</div>`;
 
@@ -445,7 +469,19 @@ async function openEditor(eventId) {
   editorView();
 }
 
+function combinarTelefones() {
+  for (const key of ['support', 'proofWhatsapp']) {
+    const sel = document.getElementById(key + 'Prefix');
+    const inp = document.getElementById(key);
+    if (!inp) continue;
+    const nacional = String(inp.value || '').replace(/\D/g, '');
+    const prefixo = String(sel && sel.value || '244').replace(/\D/g, '');
+    draft[key] = nacional ? '+' + prefixo + nacional : '';
+  }
+}
+
 async function saveDraft({ publish }) {
+  if (document.getElementById('support')) combinarTelefones();
   if (!draft) return;
   const payload = {
     name: draft.name, date: draft.date, time: draft.time, venue: draft.venue, city: draft.city,
@@ -463,7 +499,13 @@ async function saveDraft({ publish }) {
     draft.id = saved.event.id;
     draft.flyer = saved.event.flyer || draft.flyer;
     if (publish || saved.event.status !== 'published') {
-      await api('/api/team/events/' + draft.id + '/publish', { method: 'POST' });
+      try {
+        await api('/api/team/events/' + draft.id + '/publish', { method: 'POST' });
+      } catch (errP) {
+        toast('Evento guardado, mas não publicado: ' + (errP.message || 'verifica os lotes'));
+        if (button) { button.disabled = false; button.textContent = 'Publicar evento'; }
+        return;
+      }
     }
     await loadEvents();
     toast(saved.event.status === 'published' || publish ? 'Evento publicado. Link de vendas atualizado.' : 'Evento guardado.');
@@ -490,10 +532,18 @@ async function saveDraft({ publish }) {
 }
 
 async function uploadFlyer(file) {
+  const nome = String(file.name || '').toLowerCase();
+  if (/\.(heic|heif)$/.test(nome) || /heic|heif/i.test(file.type || '')) {
+    toast('Fotos HEIC do iPhone não abrem no navegador. Em Ajustes → Câmara → Formatos escolhe "Mais compatível", ou exporta como JPG.');
+    return;
+  }
   if (!/^image\//.test(file.type)) { toast('Escolhe uma imagem JPG, PNG ou WEBP.'); return; }
-  if (file.size > 8 * 1024 * 1024) { toast('A imagem é demasiado grande. Máximo 8 MB.'); return; }
+  if (file.size > 20 * 1024 * 1024) { toast('A imagem é demasiado grande. Máximo 8 MB.'); return; }
   toast('A carregar o cartaz…');
-  const blob = await compressImage(file, 1000);
+  let blob;
+  try { blob = await compressImage(file, 1200); }
+  catch { toast('Não consegui ler esta imagem. Guarda-a como JPG e tenta de novo.'); return; }
+  if (blob.size > 1400000) { try { blob = await compressImage(file, 760); } catch { } }
   try {
     const data = await api('/api/team/assets?kind=flyer', { method: 'POST', raw: { body: blob, type: 'image/jpeg' } });
     draft.flyerAsset = data.assetId;
@@ -986,7 +1036,7 @@ document.addEventListener('submit', async event => {
     const orderId = form.dataset.order;
     const file = form.querySelector('#attachFile').files?.[0];
     if (!file) { toast('Escolhe o comprovativo recebido.'); return; }
-    if (file.size > 8 * 1024 * 1024) { toast('O ficheiro é demasiado grande.'); return; }
+    if (file.size > 20 * 1024 * 1024) { toast('O ficheiro é demasiado grande.'); return; }
     try {
       const blob = await compressImage(file, 1400);
       const asset = await api('/api/team/assets?kind=proof', { method: 'POST', raw: { body: blob, type: 'image/jpeg' } });

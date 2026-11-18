@@ -4,7 +4,7 @@ import { APP_VERSION } from './schema.js';
 import { id, newToken, sha256hex, slugify, num, json, capacityOf, occupancy, expireOrders, orderWithItems, orderIsRunning, rateLimit } from './db.js';
 import { hashPassword, verifyPassword, createSession, currentUser, destroySession, sessionCookie, clearCookie, sameOrigin, clientIp, parseCookies, SESSION_COOKIE } from './auth.js';
 
-const MAX_FLYER = 1.6 * 1024 * 1024;
+const MAX_FLYER = 3 * 1024 * 1024;
 const MAX_PROOF = 2.5 * 1024 * 1024;
 const ALLOWED_IMAGES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -457,7 +457,6 @@ async function saveEvent(request, env, eventId) {
     ? await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(eventId).first()
     : null;
 
-  if (!p.flyerAsset && !existing?.flyer_asset) errors.flyer = 'Carrega o cartaz do evento.';
   if (p.flyerAsset) {
     const asset = await env.DB.prepare(`SELECT id FROM assets WHERE id = ?1`).bind(p.flyerAsset).first();
     if (!asset) errors.flyer = 'O cartaz não foi encontrado. Carrega de novo.';
@@ -529,9 +528,8 @@ async function saveEvent(request, env, eventId) {
 async function publishEvent(env, eventId) {
   const ev = await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(eventId).first();
   if (!ev) return json({ error: 'not_found' }, 404);
-  if (!ev.flyer_asset) return json({ error: 'flyer', message: 'Carrega o cartaz antes de publicar.' }, 400);
   const lots = await lotsFor(env, ev.id);
-  if (!lots.length) return json({ error: 'lots', message: 'Adiciona pelo menos um lote.' }, 400);
+  if (!lots.length) return json({ error: 'lots', message: 'Adiciona pelo menos um lote com preço e quantidade antes de publicar.' }, 400);
   await env.DB.prepare(
     `UPDATE events SET status='published', published_at=COALESCE(published_at, ?2), updated_at=?2 WHERE id=?1`
   ).bind(ev.id, Date.now()).run();
