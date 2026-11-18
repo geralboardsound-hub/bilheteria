@@ -10,7 +10,7 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "bilheteria"
-database_id = "SUBSTITUIR_PELO_DATABASE_ID"
+database_id = "3c003165-75da-4532-82e6-ec2e54214437"
 
 [assets]
 directory = "./public"
