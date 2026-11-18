@@ -547,19 +547,29 @@ async function uploadFlyer(file) {
   if (file.size > 20 * 1024 * 1024) { toast('A imagem é demasiado grande. Máximo 8 MB.'); return; }
   toast('A carregar o cartaz…');
   let blob;
-  try { blob = await compressImage(file, 1200); }
+  try { blob = await comprimirAteCaber(file); }
   catch { toast('Não consegui ler esta imagem. Guarda-a como JPG e tenta de novo.'); return; }
-  if (blob.size > 1400000) { try { blob = await compressImage(file, 760); } catch { } }
+  if (blob.size > 1_450_000) { toast(`Imagem com ${Math.round(blob.size / 1024)} KB, acima do limite de 1450 KB. Usa uma imagem mais leve.`); return; }
   try {
     const data = await api('/api/team/assets?kind=flyer', { method: 'POST', raw: { body: blob, type: 'image/jpeg' } });
     draft.flyerAsset = data.assetId;
     draft.flyer = '/api/team/assets/' + data.assetId;
     editorView();
-    toast('Cartaz carregado.');
+    toast(`Cartaz carregado (${Math.round(data.bytes / 1024)} KB). Clica em Publicar para gravar.`);
   } catch (err) { toast('Cartaz: ' + motivo(err)); }
 }
 
-function compressImage(file, max) {
+async function comprimirAteCaber(file) {
+  const passos = [[1300, 0.85], [1100, 0.8], [950, 0.75], [800, 0.7], [650, 0.65]];
+  let blob = null;
+  for (const [lado, qualidade] of passos) {
+    blob = await compressImage(file, lado, qualidade);
+    if (blob.size <= 1_200_000) break;
+  }
+  return blob;
+}
+
+function compressImage(file, max, qualidade) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -572,7 +582,7 @@ function compressImage(file, max) {
       ctx.fillStyle = '#0C1118'; ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error('compressão falhou')), 'image/jpeg', 0.82);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('compressão falhou')), 'image/jpeg', qualidade || 0.82);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagem inválida')); };
     img.src = url;

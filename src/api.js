@@ -4,7 +4,7 @@ import { APP_VERSION } from './schema.js';
 import { id, newToken, sha256hex, slugify, num, json, capacityOf, occupancy, expireOrders, orderWithItems, orderIsRunning, rateLimit } from './db.js';
 import { hashPassword, verifyPassword, createSession, currentUser, destroySession, sessionCookie, clearCookie, sameOrigin, clientIp, parseCookies, SESSION_COOKIE } from './auth.js';
 
-const MAX_FLYER = 3 * 1024 * 1024;
+const MAX_FLYER = 1_500_000;
 const MAX_PROOF = 2.5 * 1024 * 1024;
 const ALLOWED_IMAGES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -584,12 +584,14 @@ async function uploadAsset(request, env, kind, uploadedBy) {
   const buffer = await request.arrayBuffer();
   const max = kind === 'proof' ? MAX_PROOF : MAX_FLYER;
   if (!buffer.byteLength) return json({ error: 'empty', message: 'O ficheiro está vazio.' }, 400);
-  if (buffer.byteLength > max) return json({ error: 'size', message: `O ficheiro excede ${Math.round(max / 1048576 * 10) / 10} MB.` }, 413);
+  if (buffer.byteLength > max) {
+    return json({ error: 'size', message: `Imagem com ${Math.round(buffer.byteLength / 1024)} KB — o limite é ${Math.round(max / 1024)} KB. Escolhe uma imagem mais leve.` }, 413);
+  }
   const assetId = id('as');
   await env.DB.prepare(
     `INSERT INTO assets (id, mime, bytes, blob, created_at) VALUES (?1, ?2, ?3, ?4, ?5)`
   ).bind(assetId, type, buffer.byteLength, buffer, Date.now()).run();
-  return json({ assetId, bytes: buffer.byteLength, uploadedBy }, 201);
+  return json({ assetId, bytes: buffer.byteLength, uploadedBy, stored: true }, 201);
 }
 
 async function attachProof(request, env, orderId, user) {
@@ -718,6 +720,22 @@ export async function api(request, env) {
 
   if (!sameOrigin(request) && method !== 'GET') {
     return json({ error: 'csrf' }, 403);
+  }
+
+  if (path === '/api/diag/asset' && method === 'GET') {
+    const marca = 'diag-' + Math.random().toString(36).slice(2, 10);
+    const tamanho = 300 * 1024;
+    const bytes = new Uint8Array(tamanho);
+    for (let i = 0; i < tamanho; i++) bytes[i] = 255;
+    try {
+      await env.DB.prepare(`INSERT INTO assets (id, mime, bytes, blob, created_at) VALUES (?1, 'image/jpeg', ?2, ?3, ?4)`)
+        .bind(marca, tamanho, bytes, Date.now()).run();
+      const lido = await env.DB.prepare(`SELECT bytes, length(blob) AS n FROM assets WHERE id = ?1`).bind(marca).first();
+      await env.DB.prepare(`DELETE FROM assets WHERE id = ?1`).bind(marca).run();
+      return json({ ok: true, escrito: tamanho, registado: num(lido?.bytes), bytesGravados: num(lido?.n), limite: '2 MB por linha (D1)' });
+    } catch (err) {
+      return json({ ok: false, error: String((err && err.message) || err), tamanhoTestado: tamanho }, 500);
+    }
   }
 
   if (path === '/api/diag/auth' && method === 'GET') {
