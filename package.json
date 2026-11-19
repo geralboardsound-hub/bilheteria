@@ -1,6 +1,6 @@
 {
   "name": "bilheteria",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "private": true,
   "description": "Bilheteria — bilheteira digital (Cloudflare Workers + D1)",
   "scripts": {

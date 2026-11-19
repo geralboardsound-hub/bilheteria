@@ -249,7 +249,7 @@ function blankDraft() {
     accent: '#FFC400', cover: 'poster', headline: 'Garante o teu lugar', note: 'Portas abrem às 19h00',
     support: '', bankName: 'BNI', bankHolder: '', bankIban: '', bankAccount: '', proofWhatsapp: '',
     showCountdown: true, showDesc: true, showNote: true,
-    flyerAsset: null, flyer: '', lots: [{ id: 'lot-' + Math.random().toString(36).slice(2, 8), name: 'Regular', price: '5000', qty: '150' }]
+    flyerAsset: null, flyer: '/cartaz-padrao.jpg', lots: [{ id: 'lot-' + Math.random().toString(36).slice(2, 8), name: 'Regular', price: '5000', qty: '150' }]
   };
 }
 
@@ -267,7 +267,7 @@ function previewEvent(d) {
 }
 
 function coverHTML(ev) {
-  if (ev.cover === 'type' || !ev.flyer) {
+  if (!ev.flyer) {
     return `<div class="type-cover"><div class="tk">Boardsound · Bilheteira</div>
       <div class="big">${esc(ev.name || 'Nome do evento')}</div>
       <div class="bt">${ev.date ? esc(ev.city || '') : 'Data por anunciar'}</div></div>`;
@@ -356,11 +356,11 @@ function editorView() {
   const published = !!(d.id && ui.events.find(e => e.id === d.id && e.status === 'published'));
 
   const flyerBlock = `<div class="upload" id="dropzone">
-    ${d.flyer ? `<img class="prev" src="${d.flyer}" alt="Cartaz carregado">` : `<div class="ph">SEM<br>CARTAZ</div>`}
-    <div><strong>${d.flyer ? 'Cartaz carregado' : 'Carregar cartaz do evento'}</strong>
+    <img class="prev" src="${d.flyer || '/cartaz-padrao.jpg'}" alt="Cartaz do evento">
+    <div><strong>${d.flyerAsset ? 'Cartaz do evento' : 'Cartaz padrão (usado em todos os eventos)'}</strong>
       <p>Imagem vertical (JPG ou PNG). É apresentada no topo da página de vendas. Redimensionamos automaticamente.</p>
-      <div class="row"><label class="btn btn-g btn-sm" style="cursor:pointer">Escolher imagem<input id="flyerInput" type="file" accept="image/png,image/jpeg,image/webp" class="sr"></label>
-      ${d.flyer ? `<button type="button" class="linkish" data-action="drop-flyer">Remover</button>` : ''}</div>
+      <div class="row"><label class="btn btn-g btn-sm" style="cursor:pointer">Trocar imagem<input id="flyerInput" type="file" accept="image/png,image/jpeg,image/webp" class="sr"></label>
+      ${d.flyerAsset ? `<button type="button" class="linkish" data-action="drop-flyer">Voltar ao padrão</button>` : ''}</div>
     </div></div>`;
 
   const lots = `<div class="lotshead"><span>Lote</span><span>Preço (Kz)</span><span>Lugares</span><span></span></div>
@@ -465,7 +465,7 @@ async function openEditor(eventId) {
       note: ev.note || '', support: ev.support || '', bankName: ev.bankName || '', bankHolder: ev.bankHolder || '',
       bankIban: ev.bankIban || '', bankAccount: ev.bankAccount || '', proofWhatsapp: ev.proofWhatsapp || '',
       showCountdown: ev.showCountdown, showDesc: ev.showDesc, showNote: ev.showNote,
-      flyerAsset: ev.flyer ? ev.flyer.split('/').pop() : null, flyer: ev.flyer || '',
+      flyerAsset: ev.flyer && !ev.flyer.includes('cartaz-padrao') ? ev.flyer.split('/').pop() : null, flyer: ev.flyer || '/cartaz-padrao.jpg',
       lots: data.lots.map(l => ({ id: l.id, name: l.name, price: String(l.price), qty: String(l.qty) }))
     };
   } else {
@@ -854,7 +854,7 @@ async function clientView(token) {
     <div class="cli-top"><span>BOARDSOUND</span><span class="lk">Reserva ${o.id}</span></div>
     <div class="cli-wrap">${banner}
       <div class="cli-card" style="margin-top:12px"><div class="ev">
-        <img src="${ev.flyer || ''}" alt="Cartaz do evento">
+        <img src="${ev.flyer || '/cartaz-padrao.jpg'}" alt="Cartaz do evento">
         <div><div class="t">${esc(ev.name || '')}</div>
           <div class="m">${ev.date ? fullDate(new Date(ev.date + 'T' + (ev.time || '20:00') + ':00+01:00')) + '<br>' + esc(ev.time) + ' · ' + esc(ev.venue) + ', ' + esc(ev.city) : ''}</div></div></div></div>
       ${countdown}
@@ -906,7 +906,7 @@ document.addEventListener('click', async event => {
     if (draft.lots.length === 1) { toast('O evento precisa de pelo menos um lote.'); return; }
     draft.lots = draft.lots.filter(l => l.id !== action.dataset.lot); editorView(); return;
   }
-  if (a === 'drop-flyer') { draft.flyer = ''; draft.flyerAsset = null; editorView(); return; }
+  if (a === 'drop-flyer') { draft.flyer = '/cartaz-padrao.jpg'; draft.flyerAsset = null; editorView(); return; }
   if (a === 'save') { await saveDraft({ publish: true }); return; }
   if (a === 'toggle-vip') { showVipForm = !showVipForm; const id = location.pathname.split('/').pop(); eventActivityView(id); return; }
   if (a === 'cancel-vip') { showVipForm = false; eventActivityView(location.pathname.split('/').pop()); return; }

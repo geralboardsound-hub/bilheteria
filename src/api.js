@@ -40,7 +40,7 @@ function publicEvent(ev, lots, sold, occ) {
     venue: ev.venue || '',
     city: ev.city || '',
     description: ev.description || '',
-    flyer: ev.flyer_asset ? `/api/public/assets/${ev.flyer_asset}` : '',
+    flyer: ev.flyer_asset ? `/api/public/assets/${ev.flyer_asset}` : '/cartaz-padrao.jpg',
     accent: ev.accent || '#FFC400',
     cover: ev.cover || 'poster',
     headline: ev.headline || '',
@@ -73,7 +73,7 @@ function clientView(order, ev, occ) {
     event: ev ? {
       name: ev.name, date: ev.event_date, time: ev.event_time,
       venue: ev.venue, city: ev.city,
-      flyer: ev.flyer_asset ? `/api/public/assets/${ev.flyer_asset}` : '',
+      flyer: ev.flyer_asset ? `/api/public/assets/${ev.flyer_asset}` : '/cartaz-padrao.jpg',
       support: ev.support_whatsapp || ''
     } : null,
     free: occ.free
@@ -355,7 +355,7 @@ async function listEvents(env) {
     out.push({
       id: ev.id, slug: ev.slug, name: ev.name, date: ev.event_date, time: ev.event_time,
       venue: ev.venue, city: ev.city, status: ev.status, publishedAt: ev.published_at,
-      flyer: ev.flyer_asset ? `/api/team/assets/${ev.flyer_asset}` : '',
+      flyer: ev.flyer_asset ? `/api/team/assets/${ev.flyer_asset}` : '/cartaz-padrao.jpg',
       occupancy: occ, orders: num(ev.order_count),
       revenue: num((await env.DB.prepare(
         `SELECT COALESCE(SUM(total),0) AS s FROM orders WHERE event_id = ?1 AND status = 'confirmed'`
@@ -389,7 +389,7 @@ async function eventDetail(env, eventId) {
     event: {
       id: ev.id, slug: ev.slug, name: ev.name, date: ev.event_date, time: ev.event_time,
       venue: ev.venue, city: ev.city, description: ev.description, status: ev.status,
-      flyer: ev.flyer_asset ? `/api/team/assets/${ev.flyer_asset}` : '',
+      flyer: ev.flyer_asset ? `/api/team/assets/${ev.flyer_asset}` : '/cartaz-padrao.jpg',
       accent: ev.accent, cover: ev.cover, headline: ev.headline, note: ev.note,
       support: ev.support_whatsapp, bankName: ev.bank_name, bankHolder: ev.bank_holder,
       bankIban: ev.bank_iban, bankAccount: ev.bank_account, proofWhatsapp: ev.proof_whatsapp,
