@@ -1,6 +1,5 @@
 /* API da bilheteira: público (vendas e reserva) e equipa (autenticada). */
 
-import { APP_VERSION } from './schema.js';
 import qrcode from 'qrcode-generator';
 import { id, newToken, sha256hex, slugify, num, json, capacityOf, occupancy, expireOrders, orderWithItems, orderIsRunning, rateLimit } from './db.js';
 import { hashPassword, verifyPassword, createSession, currentUser, destroySession, sessionCookie, clearCookie, sameOrigin, clientIp, parseCookies, SESSION_COOKIE } from './auth.js';
@@ -23,6 +22,45 @@ async function validInviteSignature(order, scope, signature) {
 const INVITE_SCOPE = 'boardsound:convites:v1';
 const invitePath = async order => `/convites/${order.id}/${await inviteSignature(order, INVITE_SCOPE)}`;
 
+const INVITE_HELD_MESSAGE = 'Convites suspensos temporariamente. Contacta a organização para esclarecer a situação.';
+const APP_VERSION = '1.4.5';
+let inviteReviewReady = false;
+
+async function ensureInviteReview(env) {
+  if (inviteReviewReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS invite_review (
+      id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
+      held INTEGER NOT NULL CHECK (held IN (0,1)), reason TEXT NOT NULL,
+      actor_id TEXT NOT NULL, actor_name TEXT NOT NULL, ts INTEGER NOT NULL
+    )`),
+    env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_invite_review_order ON invite_review(order_id,id DESC)')
+  ]);
+  inviteReviewReady = true;
+}
+
+async function inviteOnHold(env, orderId) {
+  await ensureInviteReview(env);
+  const row = await env.DB.prepare('SELECT held FROM invite_review WHERE order_id = ?1 ORDER BY id DESC LIMIT 1').bind(orderId).first();
+  return row?.held === 1;
+}
+
+async function setInviteHold(request, env, orderId, user, held) {
+  const order = await env.DB.prepare('SELECT status FROM orders WHERE id = ?1').bind(orderId).first();
+  if (!order) return json({ error: 'not_found', message: 'Reserva não encontrada.' }, 404);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+  const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 240) return json({ error: 'reason', message: 'Indica um motivo entre 3 e 240 caracteres.' }, 400);
+  await ensureInviteReview(env);
+  const result = await env.DB.prepare(`INSERT INTO invite_review (order_id, held, reason, actor_id, actor_name, ts)
+    SELECT id, ?2, ?3, ?4, ?5, ?6 FROM orders WHERE id = ?1 AND status = 'confirmed'
+      AND COALESCE((SELECT held FROM invite_review WHERE order_id = ?1 ORDER BY id DESC LIMIT 1), 0) != ?2`)
+    .bind(orderId, held ? 1 : 0, reason, user.id, user.name, Date.now()).run();
+  if (!result.meta?.changes) return json({ error: 'state', message: 'A operação já foi aplicada ou a compra não está confirmada.' }, 409);
+  return json({ ok: true, inviteHeld: held });
+}
+
 function locateInvite(items, index) {
   if (!Number.isSafeInteger(index) || index < 1) return null;
   for (const item of items) {
@@ -38,6 +76,7 @@ async function publicInvites(env, request, match) {
   const notFound = () => json({ error: 'not_found', message: 'Convites não disponíveis.' }, 404);
   if (!order?.token_hash || order.status !== 'confirmed') return notFound();
   if (!await validInviteSignature(order, INVITE_SCOPE, signature)) return notFound();
+  if (await inviteOnHold(env, orderId)) return json({ error: 'invite_held', message: INVITE_HELD_MESSAGE }, 423);
   if (qrIndex) {
     if (!locateInvite(order.items, Number(qrIndex))) return notFound();
     const qr = qrcode(0, 'M');
@@ -313,7 +352,10 @@ async function getClientReservation(env, token) {
   const full = await orderWithItems(env, fresh);
   const occ = await occupancy(env, fresh.event_id);
   const view = clientView(full, ev, occ);
-  if (fresh.status === 'confirmed') view.ticketLink = await invitePath(fresh);
+  if (fresh.status === 'confirmed') {
+    view.inviteHeld = await inviteOnHold(env, fresh.id);
+    view.ticketLink = view.inviteHeld ? '' : await invitePath(fresh);
+  }
   return json({ order: view });
 }
 
@@ -626,14 +668,19 @@ async function orderDetailForTeam(env, orderId) {
   if (!order) return json({ error: 'not_found' }, 404);
   const ev = await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(order.event_id).first();
   const occ = await occupancy(env, order.event_id);
+  if (order.status === 'confirmed') await ensureInviteReview(env);
+  const history = order.status === 'confirmed' ? (await env.DB.prepare(`SELECT held, reason, actor_name, ts FROM invite_review
+    WHERE order_id = ?1 ORDER BY id DESC`).bind(orderId).all()).results : [];
+  const inviteHeld = history[0]?.held === 1;
   return json({
-    order: { ...orderSummary(order), ticketLink: order.status === 'confirmed' ? await invitePath(order) : '' },
+    order: { ...orderSummary(order), inviteHeld, ticketLink: order.status === 'confirmed' && !inviteHeld ? await invitePath(order) : '' },
     payment: {
       bank: order.payment_bank || '', holder: order.payment_holder || '',
       iban: order.payment_iban || '', account: order.payment_account || '',
       whatsapp: order.payment_whatsapp || ''
     },
-    log: order.log, proofName: order.proof_name, occupancy: occ,
+    log: [...order.log, ...history.map(h => ({ ts: h.ts, text: `Convites ${h.held ? 'suspensos' : 'reativados'} por ${h.actor_name}: ${h.reason}` }))].sort((a,b) => a.ts - b.ts),
+    proofName: order.proof_name, occupancy: occ,
     event: { name: ev?.name, slug: ev?.slug }
   });
 }
@@ -869,6 +916,7 @@ export async function api(request, env) {
     const order = await teamOrder(env, scan[1]);
     const item = order?.status === 'confirmed' && locateInvite(order.items, Number(scan[2]));
     if (!item || !order.token_hash || !await validInviteSignature(order, `${INVITE_SCOPE}:scan:${scan[2]}`, scan[3])) return json({ error: 'not_found', message: 'Convite não encontrado ou compra não confirmada.' }, 404);
+    if (await inviteOnHold(env, order.id)) return json({ error: 'invite_held', message: 'Convite suspenso. Não autorizes a entrada até a organização o reativar.' }, 423);
     return json({ reference: `${order.id}-${scan[2]}`, event: order.event_name, lot: item.name });
   }
   if (path === '/api/team/overview' && method === 'GET') {
@@ -929,6 +977,8 @@ export async function api(request, env) {
     }
     if (method === 'POST' && action === '/proof') return attachProof(request, env, orderId, user);
     if (method === 'POST' && action === '/confirm') return confirmOrder(request, env, orderId, user);
+    if (method === 'POST' && action === '/hold-invites') return setInviteHold(request, env, orderId, user, true);
+    if (method === 'POST' && action === '/release-invites') return setInviteHold(request, env, orderId, user, false);
     if (method === 'POST' && action === '/ticket-link') return setTicketLink(request, env, orderId);
     if (method === 'POST' && action === '/expire') return forceExpire(env, orderId);
   }

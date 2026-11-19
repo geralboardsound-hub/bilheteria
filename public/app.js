@@ -738,7 +738,13 @@ async function orderDetailView(orderId) {
     <a href="/equipa/reservas" style="font-size:12.5px;color:#8DA6FF;text-decoration:none">← Todas as reservas</a>
     <div class="thead" style="margin-top:10px"><div><div class="eyebrow">Reserva</div>
       <h1 class="t" style="font-family:'IBM Plex Mono',monospace;font-size:26px">${o.id}</h1>
-      <p class="tlead">${esc(o.eventName)} · ${esc(o.buyer.name)}</p></div><div>${statusPill(o.status)}</div></div>
+      <p class="tlead">${esc(o.eventName)} · ${esc(o.buyer.name)}</p></div><div>${o.inviteHeld ? 'Convites suspensos' : statusPill(o.status)}</div></div>
+    ${o.status === 'confirmed' ? `<div class="tcard"><h2>Estado dos convites</h2>
+      <p>${o.inviteHeld ? 'A entrada está bloqueada para todos os convites desta compra.' : 'Os convites desta compra estão ativos.'} Os lugares permanecem reservados.</p>
+      <form id="inviteHoldForm" data-order="${esc(o.id)}" data-mode="${o.inviteHeld ? 'release' : 'hold'}">
+        <div class="fld"><label for="inviteReason">Motivo (só visível à equipa)</label><input class="in" id="inviteReason" name="reason" minlength="3" maxlength="240" required></div>
+        <button class="btn ${o.inviteHeld ? 'btn-p' : 'btn-g'}" type="submit">${o.inviteHeld ? 'Reativar convites' : 'Suspender convites'}</button>
+      </form></div>` : ''}
     <div class="detail"><div>
       <div class="tcard"><h2><span class="mono">01</span> Pedido</h2>
         <dl class="facts">
@@ -758,7 +764,7 @@ async function orderDetailView(orderId) {
         ${running ? `<button class="btn btn-g btn-sm" style="margin-top:12px" data-action="expire" data-order="${o.id}">Cancelar agora</button>` : ''}</div>
       <div class="tcard"><h2><span class="mono">03</span> WhatsApp do cliente</h2>
         <p class="tsub" style="margin-bottom:10px">A mensagem muda com o estado. O envio é manual.</p>
-         ${missingPayment ? '<p class="note warn">Esta reserva não tem banco, titular e IBAN completos. Confirma os dados no separador Pagamento do evento antes de enviar instruções. Alterar o evento não muda os dados das reservas já criadas.</p>' : `
+         ${o.inviteHeld ? '<p class="note warn">O envio da confirmação está indisponível enquanto os convites estiverem suspensos.</p>' : missingPayment ? '<p class="note warn">Esta reserva não tem banco, titular e IBAN completos. Confirma os dados no separador Pagamento do evento antes de enviar instruções. Alterar o evento não muda os dados das reservas já criadas.</p>' : `
          <a class="btn btn-p btn-sm" style="width:100%;white-space:normal;text-align:center" href="${waLink(o.buyer.phone, waText)}" target="_blank" rel="noopener">${label}</a>
          <button class="btn btn-g btn-sm" style="width:100%;margin-top:9px" data-action="copy" data-text="${esc(waText)}">Copiar mensagem</button>`}
         <p style="font-size:11.5px;color:#A9B6C7;margin-top:8px">Abrir o WhatsApp não confirma a entrega.</p></div>
@@ -825,7 +831,7 @@ async function clientView(token) {
   const running = ['pending', 'review'].includes(o.status) && o.deadline > Date.now();
   document.title = 'Reserva ' + o.id + ' · Boardsound';
 
-  const banner = o.status === 'confirmed'
+  const banner = o.inviteHeld ? '<div class="banner wait">Convites suspensos temporariamente. Contacta a organização para esclarecer a situação. Não faças um novo pagamento sem falar com a equipa.</div>' : o.status === 'confirmed'
     ? '<div class="banner ok">Compra confirmada. Os teus lugares estão garantidos.</div>'
     : o.status === 'expired'
       ? '<div class="banner late">Reserva cancelada. O prazo de 12 horas terminou sem confirmação do pagamento.</div>'
@@ -836,7 +842,7 @@ async function clientView(token) {
   const countdown = running ? `<div class="cli-card"><h2>Tempo restante</h2>
     <div class="cd"><b data-dl="${o.deadline}">--:--:--</b><span>horas : min : seg<br>limite ${fullDateTime(o.deadline)}</span></div></div>` : '';
 
-  const payment = o.status !== 'expired' ? `<div class="cli-card"><h2>Dados para pagamento</h2>
+  const payment = !o.inviteHeld && o.status !== 'expired' ? `<div class="cli-card"><h2>Dados para pagamento</h2>
     <dl class="bank">
       <div><dt>Banco</dt><dd>${esc(o.payment.bank || '—')}</dd></div>
       <div><dt>Titular</dt><dd>${esc(o.payment.holder || '—')}</dd></div>
@@ -856,7 +862,7 @@ async function clientView(token) {
     <div class="wa-note">Abre o WhatsApp com a mensagem escrita. Anexa a imagem ou o PDF do comprovativo e envia.</div>
     <p class="fine">O envio não confirma a compra nem prolonga o prazo de 12 horas.</p></div>` : '';
 
-  const confirmed = o.status === 'confirmed' ? `<div class="cli-card"><h2>Ingressos</h2>
+  const confirmed = o.status === 'confirmed' && !o.inviteHeld ? `<div class="cli-card"><h2>Ingressos</h2>
     <p style="font-size:13px;line-height:1.6">Pagamento confirmado em ${fullDateTime(o.confirmedAt || Date.now())}.</p>
     ${o.ticketLink ? `<a class="btn-dark" href="${esc(o.ticketLink)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;margin-top:12px">Abrir os meus ingressos</a>`
       : '<p class="fine">A equipa envia os teus ingressos por WhatsApp. Guarda esta página.</p>'}</div>` : '';
@@ -872,7 +878,7 @@ async function clientView(token) {
       <div class="cli-card"><h2>A tua reserva</h2><dl class="bank">
         <div><dt>Ingressos</dt><dd>${o.items.map(i => `${i.qty}× ${esc(i.name)}`).join('<br>')}</dd></div>
         <div><dt>Total</dt><dd>${money(o.total)}</dd></div>
-        <div><dt>Estado</dt><dd>${o.status === 'confirmed' ? 'Confirmada' : o.status === 'expired' ? 'Cancelada' : o.status === 'review' ? 'Em análise' : 'Aguarda pagamento'}</dd></div>
+        <div><dt>Estado</dt><dd>${o.inviteHeld ? 'Convites suspensos' : o.status === 'confirmed' ? 'Confirmada' : o.status === 'expired' ? 'Cancelada' : o.status === 'review' ? 'Em análise' : 'Aguarda pagamento'}</dd></div>
       </dl></div>
       ${payment}${proof}${confirmed}
       ${o.status === 'expired' ? `<div class="cli-card"><h2>Se já pagaste</h2><p style="font-size:13px;line-height:1.6">Não pagues novamente. Contacta a organização e indica a reserva <b>${o.id}</b>. Os lugares foram libertados e podem já estar ocupados.</p></div>` : ''}
@@ -1000,6 +1006,23 @@ document.addEventListener('drop', e => {
 
 document.addEventListener('submit', async event => {
   const form = event.target;
+
+  if (form.id === 'inviteHoldForm') {
+    event.preventDefault();
+    const reason = String(new FormData(form).get('reason') || '').trim();
+    if (reason.length < 3) { toast('Indica o motivo.'); return; }
+    const release = form.dataset.mode === 'release';
+    if (!confirm(release ? 'Reativar todos os convites desta compra?' : 'Suspender todos os convites desta compra?')) return;
+    const button = form.querySelector('button');
+    button.disabled = true;
+    try {
+      await api(`/api/team/orders/${encodeURIComponent(form.dataset.order)}/${release ? 'release' : 'hold'}-invites`, { method:'POST', body:{reason} });
+      await orderDetailView(form.dataset.order);
+      toast(release ? 'Convites reativados.' : 'Convites suspensos.');
+    } catch (err) { toast(err.message); }
+    finally { button.disabled = false; }
+    return;
+  }
 
   if (form.id === 'reserveForm') {
     event.preventDefault();
