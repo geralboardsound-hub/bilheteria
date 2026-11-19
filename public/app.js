@@ -762,12 +762,16 @@ async function orderDetailView(orderId) {
 }
 
 /* ---------- página pública ---------- */
+let currentSalesEvent = null;
+
 async function salesView(slug) {
+  currentSalesEvent = null;
   document.body.className = 'public';
   const data = await api('/api/public/events/' + encodeURIComponent(slug));
   const ev = data.event;
   document.title = ev.name + ' · Boardsound';
   cart.clear();
+  currentSalesEvent = ev;
   $('#app').innerHTML = pubHTML(ev, false) + `<div class="sheetwrap" id="sheet"><div class="scrim" data-action="close-sheet"></div>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
       <button class="x-close" data-action="close-sheet" aria-label="Fechar">×</button>
@@ -798,8 +802,6 @@ function updateSheetTotal(ev) {
   const line = $('.sheet .sumline');
   if (line) line.innerHTML = `<span>${count} ingresso${count === 1 ? '' : 's'}</span><b>${money(total)}</b>`;
 }
-
-let currentSalesEvent = null;
 
 /* ---------- link do cliente ---------- */
 async function clientView(token) {
