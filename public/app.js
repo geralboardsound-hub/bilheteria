@@ -266,7 +266,11 @@ function previewEvent(d) {
   };
 }
 
-function coverHTML(ev) {
+const PUBLIC_DEFAULT_POSTER = '/cartaz-padrao.jpg';
+
+function coverHTML(ev, preview) {
+  // A página pública usa o cartaz estático enquanto o envio de imagens é testado.
+  if (!preview) return `<img src="${PUBLIC_DEFAULT_POSTER}" alt="Cartaz de ${esc(ev.name)}">`;
   if (!ev.flyer) {
     return `<div class="type-cover"><div class="tk">Boardsound · Bilheteira</div>
       <div class="big">${esc(ev.name || 'Nome do evento')}</div>
@@ -296,7 +300,7 @@ function pubHTML(ev, preview) {
   return `<div class="pub" style="--accent:${ev.accent}">
     <div class="pub-top"><span class="brand"><i class="dot"></i>Boardsound</span><span>Bilheteira digital</span></div>
     <div class="pub-shell">
-      <div class="pub-media">${coverHTML(ev)}${d ? `<div class="datebox"><span class="d">${dayNum(d)}</span><span class="m">${monthShort(d)}<br>${esc(ev.time || '')}</span></div>` : ''}</div>
+      <div class="pub-media">${coverHTML(ev, preview)}${d ? `<div class="datebox"><span class="d">${dayNum(d)}</span><span class="m">${monthShort(d)}<br>${esc(ev.time || '')}</span></div>` : ''}</div>
       <div class="pub-body">
         <div class="kicker"><span>${d ? esc(ev.city || 'Luanda') : 'Data por anunciar'}</span><span>·</span><span>Ingressos digitais</span></div>
         <h1 class="event-title">${esc(ev.name || 'Nome do evento')}</h1>
@@ -854,7 +858,7 @@ async function clientView(token) {
     <div class="cli-top"><span>BOARDSOUND</span><span class="lk">Reserva ${o.id}</span></div>
     <div class="cli-wrap">${banner}
       <div class="cli-card" style="margin-top:12px"><div class="ev">
-        <img src="${ev.flyer || '/cartaz-padrao.jpg'}" alt="Cartaz do evento">
+        <img src="${PUBLIC_DEFAULT_POSTER}" alt="Cartaz do evento">
         <div><div class="t">${esc(ev.name || '')}</div>
           <div class="m">${ev.date ? fullDate(new Date(ev.date + 'T' + (ev.time || '20:00') + ':00+01:00')) + '<br>' + esc(ev.time) + ' · ' + esc(ev.venue) + ', ' + esc(ev.city) : ''}</div></div></div></div>
       ${countdown}
@@ -1155,4 +1159,3 @@ function accountView() {
 
 window.addEventListener('popstate', () => route());
 route();
-
