@@ -575,7 +575,16 @@ async function orderDetailForTeam(env, orderId) {
   if (!order) return json({ error: 'not_found' }, 404);
   const ev = await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(order.event_id).first();
   const occ = await occupancy(env, order.event_id);
-  return json({ order: orderSummary(order), log: order.log, proofName: order.proof_name, occupancy: occ, event: { name: ev?.name, slug: ev?.slug } });
+  return json({
+    order: orderSummary(order),
+    payment: {
+      bank: order.payment_bank || '', holder: order.payment_holder || '',
+      iban: order.payment_iban || '', account: order.payment_account || '',
+      whatsapp: order.payment_whatsapp || ''
+    },
+    log: order.log, proofName: order.proof_name, occupancy: occ,
+    event: { name: ev?.name, slug: ev?.slug }
+  });
 }
 
 async function uploadAsset(request, env, kind, uploadedBy) {

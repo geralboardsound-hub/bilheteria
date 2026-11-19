@@ -727,7 +727,10 @@ async function orderDetailView(orderId) {
       ? `Compra confirmada por <b>${esc(o.operator || '—')}</b>. Movimento: ${esc(o.bankRef || '—')}.`
       : 'Reserva cancelada por prazo. Um pagamento posterior exige resolução manual: não emitas lugares já libertados.'}</div>`;
 
-  const waText = waMessage({ ...o, event: { name: o.eventName }, payment: { bank: o.payment_bank, holder: o.payment_holder, iban: o.payment_iban, account: o.payment_account, whatsapp: o.payment_whatsapp } });
+  const payment = data.payment || {};
+  const isPaymentMessage = o.status !== 'expired' && o.status !== 'confirmed';
+  const missingPayment = isPaymentMessage && ![payment.bank, payment.holder, payment.iban].every(value => String(value || '').trim());
+  const waText = missingPayment ? '' : waMessage({ ...o, event: { name: o.eventName }, payment });
   const label = o.status === 'expired' ? 'Avisar cancelamento pelo WhatsApp' : o.status === 'confirmed' ? 'Enviar confirmação e ingresso pelo WhatsApp' : 'Enviar detalhes de pagamento pelo WhatsApp';
 
   $('#app').innerHTML = consoleShell('reservas', `
@@ -754,8 +757,9 @@ async function orderDetailView(orderId) {
         ${running ? `<button class="btn btn-g btn-sm" style="margin-top:12px" data-action="expire" data-order="${o.id}">Cancelar agora</button>` : ''}</div>
       <div class="tcard"><h2><span class="mono">03</span> WhatsApp do cliente</h2>
         <p class="tsub" style="margin-bottom:10px">A mensagem muda com o estado. O envio é manual.</p>
-        <a class="btn btn-p btn-sm" style="width:100%;white-space:normal;text-align:center" href="${waLink(o.buyer.phone, waText)}" target="_blank" rel="noopener">${label}</a>
-        <button class="btn btn-g btn-sm" style="width:100%;margin-top:9px" data-action="copy" data-text="${esc(waText)}">Copiar mensagem</button>
+         ${missingPayment ? '<p class="note warn">Esta reserva não tem banco, titular e IBAN completos. Confirma os dados no separador Pagamento do evento antes de enviar instruções. Alterar o evento não muda os dados das reservas já criadas.</p>' : `
+         <a class="btn btn-p btn-sm" style="width:100%;white-space:normal;text-align:center" href="${waLink(o.buyer.phone, waText)}" target="_blank" rel="noopener">${label}</a>
+         <button class="btn btn-g btn-sm" style="width:100%;margin-top:9px" data-action="copy" data-text="${esc(waText)}">Copiar mensagem</button>`}
         <p style="font-size:11.5px;color:#A9B6C7;margin-top:8px">Abrir o WhatsApp não confirma a entrega.</p></div>
       <div class="tcard"><h2><span class="mono">04</span> Histórico</h2><ul class="timeline">${log}</ul></div>
     </aside></div>`);
