@@ -1,8 +1,57 @@
 /* API da bilheteira: público (vendas e reserva) e equipa (autenticada). */
 
 import { APP_VERSION } from './schema.js';
+import qrcode from 'qrcode-generator';
 import { id, newToken, sha256hex, slugify, num, json, capacityOf, occupancy, expireOrders, orderWithItems, orderIsRunning, rateLimit } from './db.js';
 import { hashPassword, verifyPassword, createSession, currentUser, destroySession, sessionCookie, clearCookie, sameOrigin, clientIp, parseCookies, SESSION_COOKIE } from './auth.js';
+
+async function inviteKey(order) {
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(order.token_hash),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+async function inviteSignature(order, scope) {
+  const signature = await crypto.subtle.sign('HMAC', await inviteKey(order), new TextEncoder().encode(scope));
+  return Array.from(new Uint8Array(signature), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function validInviteSignature(order, scope, signature) {
+  const bytes = Uint8Array.from(signature.match(/../g), b => parseInt(b, 16));
+  return crypto.subtle.verify('HMAC', await inviteKey(order), bytes, new TextEncoder().encode(scope));
+}
+
+const INVITE_SCOPE = 'boardsound:convites:v1';
+const invitePath = async order => `/convites/${order.id}/${await inviteSignature(order, INVITE_SCOPE)}`;
+
+function locateInvite(items, index) {
+  if (!Number.isSafeInteger(index) || index < 1) return null;
+  for (const item of items) {
+    if (index <= item.qty) return item;
+    index -= item.qty;
+  }
+  return null;
+}
+
+async function publicInvites(env, request, match) {
+  const [, orderId, signature, qrIndex] = match;
+  const order = await teamOrder(env, orderId);
+  const notFound = () => json({ error: 'not_found', message: 'Convites não disponíveis.' }, 404);
+  if (!order?.token_hash || order.status !== 'confirmed') return notFound();
+  if (!await validInviteSignature(order, INVITE_SCOPE, signature)) return notFound();
+  if (qrIndex) {
+    if (!locateInvite(order.items, Number(qrIndex))) return notFound();
+    const qr = qrcode(0, 'M');
+    const scanSignature = await inviteSignature(order, `${INVITE_SCOPE}:scan:${qrIndex}`);
+    qr.addData(new URL(`/equipa/convites/${order.id}/${qrIndex}/${scanSignature}`, request.url).href);
+    qr.make();
+    return new Response(qr.createSvgTag({ cellSize: 5, margin: 20, scalable: true }), {
+      headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+    });
+  }
+  const event = await env.DB.prepare('SELECT name, slug, event_date AS date, event_time AS time, venue FROM events WHERE id = ?1').bind(order.event_id).first();
+  if (!event) return notFound();
+  return json({ event, orderId, groups: order.items.map(({ name, qty }) => ({ name, qty })) });
+}
 
 const MAX_FLYER = 1_500_000;
 const MAX_PROOF = 2.5 * 1024 * 1024;
@@ -263,7 +312,9 @@ async function getClientReservation(env, token) {
   const ev = await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(fresh.event_id).first();
   const full = await orderWithItems(env, fresh);
   const occ = await occupancy(env, fresh.event_id);
-  return json({ order: clientView(full, ev, occ) });
+  const view = clientView(full, ev, occ);
+  if (fresh.status === 'confirmed') view.ticketLink = await invitePath(fresh);
+  return json({ order: view });
 }
 
 /* ------------------------------------------------------------------ */
@@ -576,7 +627,7 @@ async function orderDetailForTeam(env, orderId) {
   const ev = await env.DB.prepare(`SELECT * FROM events WHERE id = ?1`).bind(order.event_id).first();
   const occ = await occupancy(env, order.event_id);
   return json({
-    order: orderSummary(order),
+    order: { ...orderSummary(order), ticketLink: order.status === 'confirmed' ? await invitePath(order) : '' },
     payment: {
       bank: order.payment_bank || '', holder: order.payment_holder || '',
       iban: order.payment_iban || '', account: order.payment_account || '',
@@ -790,6 +841,9 @@ export async function api(request, env) {
   const clientRes = path.match(/^\/api\/public\/reservations\/([\w-]+)$/);
   if (clientRes && method === 'GET') return getClientReservation(env, clientRes[1]);
 
+  const invite = path.match(/^\/api\/public\/convites\/([\w-]+)\/([a-f0-9]{64})(?:\/qr\/([1-9][0-9]{0,8}))?$/);
+  if (invite && method === 'GET') return publicInvites(env, request, invite);
+
   /* ---- autenticação ---- */
   if (path === '/api/auth/login' && method === 'POST') return login(request, env);
   if (path === '/api/setup') {
@@ -810,6 +864,13 @@ export async function api(request, env) {
   if (!user) return json({ error: 'unauthenticated', message: 'Sessão expirada. Entra novamente.' }, 401);
 
   /* ---- equipa ---- */
+  const scan = path.match(/^\/api\/team\/convites\/([\w-]+)\/([1-9][0-9]{0,8})\/([a-f0-9]{64})$/);
+  if (scan && method === 'GET') {
+    const order = await teamOrder(env, scan[1]);
+    const item = order?.status === 'confirmed' && locateInvite(order.items, Number(scan[2]));
+    if (!item || !order.token_hash || !await validInviteSignature(order, `${INVITE_SCOPE}:scan:${scan[2]}`, scan[3])) return json({ error: 'not_found', message: 'Convite não encontrado ou compra não confirmada.' }, 404);
+    return json({ reference: `${order.id}-${scan[2]}`, event: order.event_name, lot: item.name });
+  }
   if (path === '/api/team/overview' && method === 'GET') {
     const events = await env.DB.prepare(`SELECT COUNT(*) AS n FROM events`).first();
     const sold = await env.DB.prepare(

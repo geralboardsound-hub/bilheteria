@@ -432,3 +432,14 @@ body.public .pub{padding-bottom:132px}
 .acctmsg { min-height: 18px; font-size: 13px; }
 .acctmsg .bad { color: #FF8A8A; }
 .acctmsg .good { color: #7BE0A8; }
+
+/* Convites digitais: arte original e QR com margem branca. */
+.invite-wrap{max-width:1080px;margin:auto;padding:clamp(16px,4vw,44px);color:#211634}
+.invite-wrap h1{margin:0 0 22px;font-size:clamp(24px,5vw,38px)}
+.invite-card{display:grid;grid-template-columns:minmax(0,1fr) 200px;margin-bottom:24px;border:1px solid #d9cce6;border-radius:14px;overflow:hidden;background:#fff;break-inside:avoid}
+.invite-main{background:#321459;color:#fff}
+.invite-art{display:block;width:100%;height:auto}
+.invite-info{padding:16px 20px}.invite-info small{color:#efce8e;letter-spacing:.12em}.invite-info h2{margin:6px 0}.invite-info p{margin:6px 0}
+.invite-code{padding:12px;align-self:center;display:grid;justify-items:center;gap:4px;text-align:center;font-size:13px}
+.invite-code img{display:block;background:#fff}.invite-code strong{font-family:monospace;font-size:15px}
+@media(max-width:600px){.invite-card{grid-template-columns:minmax(0,1fr)}.invite-code{border-top:1px dashed #9c88ad}}

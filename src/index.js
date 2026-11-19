@@ -44,7 +44,7 @@ export default {
     const response = await env.ASSETS.fetch(request);
     const headers = new Headers(response.headers);
     for (const [key, value] of Object.entries(SECURITY_HEADERS)) headers.set(key, value);
-    if (url.pathname.startsWith('/r/') || url.pathname.startsWith('/e/')) {
+    if (url.pathname.startsWith('/r/') || url.pathname.startsWith('/e/') || url.pathname.startsWith('/convites/')) {
       headers.set('cache-control', 'no-store');
       headers.set('referrer-policy', 'no-referrer');
     }

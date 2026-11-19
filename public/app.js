@@ -142,7 +142,7 @@ function loginView(error) {
       });
       session = data.user;
       const next = new URLSearchParams(location.search).get('next');
-      location.href = next && next.startsWith('/') ? next : '/equipa/eventos';
+      location.href = next && /^\/equipa(?:\/|$)/.test(next) && !next.includes('\\') ? next : '/equipa/eventos';
     } catch (err) {
       const extra = err?.data?.detail ? ` [${err.data.detail}]` : '';
       loginView(err.message + detalhe(err));
@@ -720,8 +720,8 @@ async function orderDetailView(orderId) {
   const approve = running ? `<form id="approveForm" data-order="${o.id}" style="margin-top:16px;padding-top:14px;border-top:1px solid #1B222C">
       <div class="fgrp"><div class="fld"><label for="operator">Quem conferiu</label><input class="in" id="operator" name="operator" value="${esc(session?.name || '')}" maxlength="60" required></div>
       <div class="fld"><label for="bankRef">Referência do movimento</label><input class="in" id="bankRef" name="bankRef" placeholder="Nº no extrato" maxlength="60" required></div>
-      <div class="fld"><label for="amount">Montante recebido (Kz)</label><input class="in" id="amount" name="amount" inputmode="numeric" value="${o.total}" required></div>
-      <div class="fld"><label for="ticketLink">Link do ingresso · opcional</label><input class="in" id="ticketLink" name="ticketLink" type="url" placeholder="https://…" value="${esc(o.ticketLink || '')}"></div></div>
+       <div class="fld"><label for="amount">Montante recebido (Kz)</label><input class="in" id="amount" name="amount" inputmode="numeric" value="${o.total}" required></div></div>
+       <p class="tsub">Os convites digitais são emitidos ao confirmar a compra.</p>
       <button class="btn btn-p" type="submit" style="margin-top:14px">Confirmar compra</button></form>`
     : `<div class="note${o.status === 'expired' ? ' warn' : ''}">${o.status === 'confirmed'
       ? `Compra confirmada por <b>${esc(o.operator || '—')}</b>. Movimento: ${esc(o.bankRef || '—')}.`
@@ -730,7 +730,8 @@ async function orderDetailView(orderId) {
   const payment = data.payment || {};
   const isPaymentMessage = o.status !== 'expired' && o.status !== 'confirmed';
   const missingPayment = isPaymentMessage && ![payment.bank, payment.holder, payment.iban].every(value => String(value || '').trim());
-  const waText = missingPayment ? '' : waMessage({ ...o, event: { name: o.eventName }, payment });
+  const ticketLink = o.ticketLink && new URL(o.ticketLink, location.origin).href;
+  const waText = missingPayment ? '' : waMessage({ ...o, ticketLink, event: { name: o.eventName }, payment });
   const label = o.status === 'expired' ? 'Avisar cancelamento pelo WhatsApp' : o.status === 'confirmed' ? 'Enviar confirmação e ingresso pelo WhatsApp' : 'Enviar detalhes de pagamento pelo WhatsApp';
 
   $('#app').innerHTML = consoleShell('reservas', `
@@ -1082,17 +1083,58 @@ document.addEventListener('submit', async event => {
         method: 'POST',
         body: {
           operator: form.operator.value.trim(), bankRef: form.bankRef.value.trim(),
-          amount: num(form.amount.value), ticketLink: form.ticketLink.value.trim()
+           amount: num(form.amount.value)
         }
       });
       await orderDetailView(orderId);
-      toast('Compra confirmada.');
+      toast('Compra confirmada. Convites digitais disponíveis.');
     } catch (err) { toast(err.message); }
     return;
   }
 });
 
 /* ---------- encaminhador ---------- */
+async function inviteView(orderId, key) {
+  document.body.className = 'client';
+  const base = `/api/public/convites/${encodeURIComponent(orderId)}/${encodeURIComponent(key)}`;
+  let data;
+  try { data = await api(base); }
+  catch (err) { $('#app').innerHTML = `<main class="invite-wrap"><h1>Convites não disponíveis</h1><p>${esc(err.message)}</p></main>`; return; }
+  const { event, groups } = data;
+  const date = evDate(event);
+  document.title = `${event.name} · Convites digitais`;
+  let index = 0;
+  const concert = event.slug === 'concerto-do-calvario-ao-trono';
+  const cards = groups.flatMap(group => Array.from({ length: group.qty }, () => {
+    const n = ++index;
+    return `<article class="invite-card">
+      <div class="invite-main">
+        ${concert ? '<img class="invite-art" src="/arte-convite-calvario.png" alt="Arte do concerto Do Calvário ao Trono">' : ''}
+        <div class="invite-info"><small>BOARDSOUND · CONVITE DIGITAL</small><h2>${esc(event.name)}</h2>
+        <p>${date ? esc(fullDate(date)) : ''} · ${esc(event.venue || '')}</p>
+        <p><strong>Horário registado na bilheteira: ${esc(event.time || 'a confirmar')}</strong></p>
+        ${concert && event.time !== '19:30' ? '<p>Para o horário, segue a informação acima e não a hora impressa na arte.</p>' : ''}
+        </div>
+      </div>
+      <div class="invite-code"><span>INGRESSO ${n} · ${esc(group.name)}</span>
+        <img src="${base}/qr/${n}" alt="Código QR do ingresso ${n}" width="148" height="148">
+        <strong>${esc(orderId)}-${n}</strong><span>Apresenta à entrada</span>
+      </div></article>`;
+  })).join('');
+  $('#app').innerHTML = `<main class="invite-wrap"><h1>Os teus convites</h1>${cards}</main>`;
+}
+
+async function scanInviteView(orderId, index, signature) {
+  $('#app').innerHTML = '<main class="invite-wrap"><p>A consultar convite…</p></main>';
+  try {
+    const data = await api(`/api/team/convites/${encodeURIComponent(orderId)}/${encodeURIComponent(index)}/${encodeURIComponent(signature)}`);
+    $('#app').innerHTML = `<main class="invite-wrap"><h1>Compra confirmada</h1><p>${esc(data.event)} · ${esc(data.lot)}</p>
+      <p>Referência: <strong>${esc(data.reference)}</strong></p><p>Esta consulta não regista a entrada.</p></main>`;
+  } catch (err) {
+    $('#app').innerHTML = `<main class="invite-wrap"><h1>Convite não verificado</h1><p>${esc(err.message)}</p></main>`;
+  }
+}
+
 async function route() {
   const parts = location.pathname.split('/').filter(Boolean);
   const isPublic = parts[0] === 'e' && parts[1];
@@ -1100,6 +1142,7 @@ async function route() {
 
   if (isPublic) { await salesView(parts[1]).catch(() => { location.href = '/e/' + parts[1]; }); return; }
   if (isClient) { await clientView(parts[1]); return; }
+  if (parts[0] === 'convites' && /^[\w-]+$/.test(parts[1] || '') && /^[a-f0-9]{64}$/.test(parts[2] || '')) { await inviteView(parts[1], parts[2]); return; }
 
   if (!session) {
     try { session = (await api('/api/auth/me')).user; } catch { session = null; }
@@ -1107,6 +1150,10 @@ async function route() {
 
   if (parts[0] === 'instalar') { location.replace('/entrar'); return; }
   if (parts[0] === 'entrar') { loginView(); return; }
+  if (parts[0] === 'equipa' && parts[1] === 'convites' && parts[2] && parts[3] && parts[4]) {
+    if (!session) { location.replace('/entrar?next=' + encodeURIComponent(location.pathname)); return; }
+    document.body.className = 'client'; await scanInviteView(parts[2], parts[3], parts[4]); return;
+  }
   if (!session) { location.replace('/entrar'); return; }
 
   document.body.className = 'team';
