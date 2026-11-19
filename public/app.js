@@ -92,7 +92,7 @@ function waMessage(order) {
     return `Olá, ${order.buyer.name}. A reserva ${order.id} para ${eventName} foi cancelada porque o prazo de 12 horas terminou sem confirmação da compra.\n\nOs lugares foram libertados. Uma nova reserva fica sujeita à disponibilidade.\n\nSe já pagaste, não pagues novamente. Responde a esta mensagem com o comprovativo e o número da reserva para verificarmos a situação.\n\nBoardsound`;
   }
   if (order.status === 'confirmed') {
-    return `Olá, ${order.buyer.name}! O pagamento da reserva ${order.id} foi confirmado.\n\nEvento: ${eventName}\nIngressos: ${(order.items || []).map(i => `${i.qty}× ${i.name}`).join(', ')}\nTotal pago: ${money(order.total)}\n\n${order.ticketLink ? 'Acede aos teus ingressos:\n' + order.ticketLink : 'A equipa enviará os teus ingressos nesta conversa.'}\n\nObrigado por escolheres a Boardsound.`;
+    return `Olá, ${order.buyer.name}! O pagamento da reserva ${order.id} foi confirmado.\n\nEvento: ${eventName}\nIngressos: ${(order.items || []).map(i => `${i.qty}× ${i.name}`).join(', ')}\nTotal pago: ${money(order.total)}\n\n${order.ticketLink ? 'Abre os teus ingressos e guarda o PDF no teu dispositivo:\n' + order.ticketLink : 'A equipa enviará os teus ingressos nesta conversa.'}\n\nObrigado por escolheres a Boardsound.`;
   }
   return `Olá, ${order.buyer.name}. A tua reserva ${order.id} para ${eventName} está registada.\n\n${when}Ingressos: ${(order.items || []).map(i => `${i.qty}× ${i.name} (${money(i.price)} cada)`).join(', ')}\nTotal: ${money(order.total)}\n\nPagamento por transferência:\nBanco: ${p.bank || '—'}\nTitular: ${p.holder || '—'}\nIBAN: ${p.iban || '—'}${p.account ? '\nConta: ' + p.account : ''}\nValor: ${money(order.total)}\nReferência: ${order.id}\n\nDepois de pagares, envia o comprovativo por WhatsApp para ${p.whatsapp || 'a organização'}.\n\nTens 12 horas. O prazo termina em ${fullDateTime(order.deadline)} (hora de Angola). O envio do comprovativo não prolonga o prazo.`;
 }
@@ -766,7 +766,10 @@ async function orderDetailView(orderId) {
         <p class="tsub" style="margin-bottom:10px">A mensagem muda com o estado. O envio é manual.</p>
          ${o.inviteHeld ? '<p class="note warn">O envio da confirmação está indisponível enquanto os convites estiverem suspensos.</p>' : missingPayment ? '<p class="note warn">Esta reserva não tem banco, titular e IBAN completos. Confirma os dados no separador Pagamento do evento antes de enviar instruções. Alterar o evento não muda os dados das reservas já criadas.</p>' : `
          <a class="btn btn-p btn-sm" style="width:100%;white-space:normal;text-align:center" href="${waLink(o.buyer.phone, waText)}" target="_blank" rel="noopener">${label}</a>
-         <button class="btn btn-g btn-sm" style="width:100%;margin-top:9px" data-action="copy" data-text="${esc(waText)}">Copiar mensagem</button>`}
+         <button class="btn btn-g btn-sm" style="width:100%;margin-top:9px" data-action="copy" data-text="${esc(waText)}">Copiar mensagem</button>
+         ${o.status === 'confirmed' && o.ticketLink ? (o.items.reduce((sum,item)=>sum+item.qty,0) <= 20
+           ? `<a class="btn btn-g btn-sm" style="width:100%;margin-top:9px" href="${esc('/api/public' + o.ticketLink + '/pdf/todos')}">Descarregar PDF para anexar</a>`
+           : `<a class="btn btn-g btn-sm" style="width:100%;margin-top:9px" href="${esc(o.ticketLink)}">Abrir PDFs individuais</a>`) : ''}`}
         <p style="font-size:11.5px;color:#A9B6C7;margin-top:8px">Abrir o WhatsApp não confirma a entrega.</p></div>
       <div class="tcard"><h2><span class="mono">04</span> Histórico</h2><ul class="timeline">${log}</ul></div>
     </aside></div>`);
@@ -1142,9 +1145,11 @@ async function inviteView(orderId, key) {
       <div class="invite-code"><span>INGRESSO ${n} · ${esc(group.name)}</span>
         <img src="${base}/qr/${n}" alt="Código QR do ingresso ${n}" width="148" height="148">
         <strong>${esc(orderId)}-${n}</strong><span>Apresenta à entrada</span>
+        <a href="${base}/pdf/${n}">Descarregar PDF</a>
       </div></article>`;
   })).join('');
-  $('#app').innerHTML = `<main class="invite-wrap"><h1>Os teus convites</h1>${cards}</main>`;
+  $('#app').innerHTML = `<main class="invite-wrap"><h1>Os teus convites</h1>
+    ${index > 1 && index <= 20 ? `<p><a href="${base}/pdf/todos">Descarregar todos os convites em PDF</a></p>` : ''}${cards}</main>`;
 }
 
 async function scanInviteView(orderId, index, signature) {

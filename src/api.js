@@ -1,6 +1,7 @@
 /* API da bilheteira: público (vendas e reserva) e equipa (autenticada). */
 
 import qrcode from 'qrcode-generator';
+import { invitePDF } from './invite-pdf.js';
 import { id, newToken, sha256hex, slugify, num, json, capacityOf, occupancy, expireOrders, orderWithItems, orderIsRunning, rateLimit } from './db.js';
 import { hashPassword, verifyPassword, createSession, currentUser, destroySession, sessionCookie, clearCookie, sameOrigin, clientIp, parseCookies, SESSION_COOKIE } from './auth.js';
 
@@ -23,7 +24,7 @@ const INVITE_SCOPE = 'boardsound:convites:v1';
 const invitePath = async order => `/convites/${order.id}/${await inviteSignature(order, INVITE_SCOPE)}`;
 
 const INVITE_HELD_MESSAGE = 'Convites suspensos temporariamente. Contacta a organização para esclarecer a situação.';
-const APP_VERSION = '1.4.5';
+const APP_VERSION = '1.4.6';
 let inviteReviewReady = false;
 
 async function ensureInviteReview(env) {
@@ -70,8 +71,16 @@ function locateInvite(items, index) {
   return null;
 }
 
+async function makeInviteQr(order, index, url) {
+  const qr = qrcode(0, 'M');
+  const sig = await inviteSignature(order, `${INVITE_SCOPE}:scan:${index}`);
+  qr.addData(new URL(`/equipa/convites/${order.id}/${index}/${sig}`, url).href);
+  qr.make();
+  return qr;
+}
+
 async function publicInvites(env, request, match) {
-  const [, orderId, signature, qrIndex] = match;
+  const [, orderId, signature, qrIndex, pdfIndex] = match;
   const order = await teamOrder(env, orderId);
   const notFound = () => json({ error: 'not_found', message: 'Convites não disponíveis.' }, 404);
   if (!order?.token_hash || order.status !== 'confirmed') return notFound();
@@ -79,16 +88,33 @@ async function publicInvites(env, request, match) {
   if (await inviteOnHold(env, orderId)) return json({ error: 'invite_held', message: INVITE_HELD_MESSAGE }, 423);
   if (qrIndex) {
     if (!locateInvite(order.items, Number(qrIndex))) return notFound();
-    const qr = qrcode(0, 'M');
-    const scanSignature = await inviteSignature(order, `${INVITE_SCOPE}:scan:${qrIndex}`);
-    qr.addData(new URL(`/equipa/convites/${order.id}/${qrIndex}/${scanSignature}`, request.url).href);
-    qr.make();
+    const qr = await makeInviteQr(order, qrIndex, request.url);
     return new Response(qr.createSvgTag({ cellSize: 5, margin: 20, scalable: true }), {
       headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
     });
   }
   const event = await env.DB.prepare('SELECT name, slug, event_date AS date, event_time AS time, venue FROM events WHERE id = ?1').bind(order.event_id).first();
   if (!event) return notFound();
+  if (pdfIndex) {
+    const total = order.items.reduce((sum, item) => sum + item.qty, 0);
+    const index = pdfIndex === 'todos' ? 1 : Number(pdfIndex);
+    const end = pdfIndex === 'todos' ? total : index;
+    if (!locateInvite(order.items, index)) return notFound();
+    if (end - index + 1 > 20) return json({ error: 'pdf_size', message: 'Nesta compra, descarrega o PDF de cada ingresso separadamente.' }, 400);
+    let art;
+    if (event.slug === 'concerto-do-calvario-ao-trono') {
+      const image = await env.ASSETS.fetch(new Request(new URL('/arte-convite-calvario-pdf.jpg', request.url)));
+      if (!image.ok || !image.headers.get('content-type')?.startsWith('image/jpeg')) throw new Error('Arte PDF indisponível.');
+      art = await image.arrayBuffer();
+    }
+    const tickets = [];
+    for (let i = index; i <= end; i++) tickets.push({ index:i, lot:locateInvite(order.items,i).name, qr:await makeInviteQr(order,i,request.url) });
+    const pdf = await invitePDF(event, orderId, tickets, art);
+    return new Response(pdf, { headers: {
+      'content-type': 'application/pdf', 'cache-control': 'private, no-store',
+      'content-disposition': `attachment; filename="boardsound-${orderId}-${pdfIndex}.pdf"`, 'x-content-type-options': 'nosniff'
+    } });
+  }
   return json({ event, orderId, groups: order.items.map(({ name, qty }) => ({ name, qty })) });
 }
 
@@ -888,7 +914,7 @@ export async function api(request, env) {
   const clientRes = path.match(/^\/api\/public\/reservations\/([\w-]+)$/);
   if (clientRes && method === 'GET') return getClientReservation(env, clientRes[1]);
 
-  const invite = path.match(/^\/api\/public\/convites\/([\w-]+)\/([a-f0-9]{64})(?:\/qr\/([1-9][0-9]{0,8}))?$/);
+  const invite = path.match(/^\/api\/public\/convites\/([\w-]+)\/([a-f0-9]{64})(?:\/qr\/([1-9][0-9]{0,8})|\/pdf\/(todos|[1-9][0-9]{0,8}))?$/);
   if (invite && method === 'GET') return publicInvites(env, request, invite);
 
   /* ---- autenticação ---- */
